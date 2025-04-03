@@ -90,13 +90,20 @@ if result_file is not None and station_file is not None:
     result_data = pd.read_csv(result_file)
     station_data = pd.read_csv(station_file)
 
-    # Convert dates
-    result_data['ActivityStartDate'] = pd.to_datetime(result_data['ActivityStartDate'])
+    # --- Convert columns to correct types ---
+    result_data['ActivityStartDate'] = pd.to_datetime(result_data['ActivityStartDate'], errors='coerce')
+    result_data['ResultMeasureValue'] = pd.to_numeric(result_data['ResultMeasureValue'], errors='coerce')
+
+    # Drop invalid/missing rows
+    result_data = result_data.dropna(subset=['ActivityStartDate', 'ResultMeasureValue'])
 
     # --- Sidebar filters ---
     st.sidebar.header("Filter Options")
-    contaminant_list = result_data['CharacteristicName'].unique()
-    contaminant = st.sidebar.selectbox("Select a contaminant:", contaminant_list)
+    contaminant_list = sorted(result_data['CharacteristicName'].dropna().unique())  # 👈 Sorted alphabetically
+
+    # Default to "Barium" if available
+    default_index = contaminant_list.index('Barium') if 'Barium' in contaminant_list else 0
+    contaminant = st.sidebar.selectbox("Select a contaminant:", contaminant_list, index=default_index)
 
     filtered_data = result_data[result_data['CharacteristicName'] == contaminant]
     min_val = float(filtered_data['ResultMeasureValue'].min())
@@ -127,7 +134,8 @@ if result_file is not None and station_file is not None:
         for _, row in filtered_result_data.iterrows():
             site_info = station_data[station_data['MonitoringLocationIdentifier'] == row['MonitoringLocationIdentifier']]
             if not site_info.empty:
-                popup_text = f"{row['MonitoringLocationName']}<br>{contaminant}: {row['ResultMeasureValue']}"
+                site_name = site_info.iloc[0]['MonitoringLocationName'] if 'MonitoringLocationName' in site_info.columns else "Unknown Site"
+                popup_text = f"{site_name}<br>{contaminant}: {row['ResultMeasureValue']}"
                 folium.Marker(
                     location=[site_info.iloc[0]['LatitudeMeasure'], site_info.iloc[0]['LongitudeMeasure']],
                     popup=popup_text
@@ -136,11 +144,13 @@ if result_file is not None and station_file is not None:
         st.subheader("Monitoring Locations Map")
         folium_static(site_map)
 
-        # --- Plot ---
+        # --- Chronological Plot ---
         st.subheader(f"{contaminant} Trend Over Time")
+
         plt.figure(figsize=(10, 6))
         for site in filtered_result_data['MonitoringLocationIdentifier'].unique():
             site_data = filtered_result_data[filtered_result_data['MonitoringLocationIdentifier'] == site]
+            site_data = site_data.sort_values('ActivityStartDate')  # 👈 Chronological order
             plt.plot(site_data['ActivityStartDate'], site_data['ResultMeasureValue'], label=site)
 
         plt.xlabel('Date')
